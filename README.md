@@ -2,8 +2,6 @@
 
 Live stock, ETF, crypto and commodity prices inside Obsidian — iOS Stocks-style minimal sidebar watchlist.
 
-![ObsidiStocks preview](https://raw.githubusercontent.com/ethanbeddard/obsidistocks/main/preview.png)
-
 ## Features
 
 **Free**
