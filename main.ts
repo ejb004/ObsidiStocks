@@ -334,12 +334,14 @@ function buildInteractiveChart(container: HTMLElement, closes: number[], timesta
         }
         tip.textContent = label;
         tip.style.opacity = '1';
-        const offsetX = e.clientX - rect.left + PL; // account for Y-axis padding
-        if (offsetX > rect.width * 0.65) {
+        // Position relative to wrap; offsetX is cursor position within the chart area + left padding
+        const wrapRect = wrap.getBoundingClientRect();
+        const cursorInWrap = e.clientX - wrapRect.left;
+        if (cursorInWrap > wrapRect.width * 0.6) {
             tip.style.left = 'auto';
-            tip.style.right = `${rect.width - offsetX + 10}px`;
+            tip.style.right = `${wrapRect.width - cursorInWrap + 8}px`;
         } else {
-            tip.style.left = `${offsetX + 10}px`;
+            tip.style.left = `${cursorInWrap + 8}px`;
             tip.style.right = 'auto';
         }
     });
