@@ -1,0 +1,11 @@
+{
+  "id": "obsidistocks",
+  "name": "ObsidiStocks",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Live stocks, ETF, crypto and commodities watchlist. iOS-style prices, sparklines and price alerts inside Obsidian.",
+  "author": "Ethan Beddard",
+  "authorUrl": "https://github.com/ethanbeddard",
+  "fundingUrl": "https://gumroad.com/l/obsidistocks-pro",
+  "isDesktopOnly": false
+}
