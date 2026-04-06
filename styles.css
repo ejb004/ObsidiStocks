@@ -110,7 +110,8 @@
 .st-ichart-tip {
     position: absolute;
     top: 6px;
-    left: 10px;
+    left: var(--st-tip-left, 10px);
+    right: var(--st-tip-right, auto);
     background: var(--background-modifier-border);
     color: var(--text-normal);
     font-size: 11px;
@@ -119,7 +120,7 @@
     border-radius: 4px;
     pointer-events: none;
     white-space: nowrap;
-    opacity: 0;
+    opacity: var(--st-tip-opacity, 0);
     transition: opacity 0.1s;
 }
 
@@ -138,6 +139,10 @@
     border-bottom: 1px solid var(--background-modifier-border-hover);
     cursor: default;
     transition: background 0.12s;
+}
+
+.st-row-clickable {
+    cursor: pointer;
 }
 
 .st-row:last-child {
@@ -185,6 +190,7 @@
     height: 100%;
     background: var(--color-accent);
     border-radius: 2px;
+    width: var(--st-fill-width, 50%);
     transition: width 0.3s ease;
 }
 
@@ -222,6 +228,8 @@
     border-radius: 4px;
     padding: 1px 5px;
     white-space: nowrap;
+    opacity: var(--st-change-opacity, 1);
+    background: var(--st-change-bg, transparent) !important;
 }
 
 .st-change-up   { background: hsla(var(--color-green-hsl, 142 70% 45%), 0.15); color: var(--color-green, #30d158); }

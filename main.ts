@@ -2,6 +2,8 @@ import {
     App,
     ItemView,
     MarkdownView,
+    Menu,
+    MenuItem,
     Modal,
     Notice,
     Plugin,
@@ -39,6 +41,15 @@ interface Quote {
     volume: number; marketState: string; prePrice: number; postPrice: number;
     news: { title: string; link: string; publisher: string }[];
 }
+interface YahooMeta {
+    regularMarketPrice?: number; chartPreviousClose?: number;
+    currency?: string; shortName?: string; longName?: string;
+    regularMarketDayHigh?: number; regularMarketDayLow?: number;
+    fiftyTwoWeekHigh?: number; fiftyTwoWeekLow?: number;
+    regularMarketVolume?: number; marketState?: string;
+    preMarketPrice?: number; postMarketPrice?: number;
+}
+interface YahooNewsItem { title?: string; link?: string; publisher?: string; }
 interface Settings {
     watchlist: WatchItem[]; refreshMins: number; sparkRange: SparkRange; licenceKey: string; licenceValid: boolean;
 }
@@ -176,7 +187,7 @@ function candidateURLs(ticker: string, range: SparkRange): { url: string; post?:
 async function fetchQuote(ticker: string, range: SparkRange, withNews: boolean): Promise<Quote | null> {
     try {
         const candidates = candidateURLs(ticker, range);
-        let meta: any = null;
+        let meta: YahooMeta | null = null;
         let closes: number[] = [];
         let timestamps: number[] = [];
 
@@ -185,7 +196,7 @@ async function fetchQuote(ticker: string, range: SparkRange, withNews: boolean):
                 const res    = await requestUrl({ url, headers: { 'User-Agent': UA } });
                 const result = res.json?.chart?.result?.[0];
                 if (!result) continue;
-                meta = result.meta;
+                meta = result.meta as YahooMeta;
                 const rawCloses     = (result.indicators?.quote?.[0]?.close ?? []) as (number | null)[];
                 const rawTimestamps = (result.timestamp ?? []) as number[];
                 let pairs: ValidPair[] = rawCloses
@@ -211,7 +222,7 @@ async function fetchQuote(ticker: string, range: SparkRange, withNews: boolean):
         if (withNews) {
             try {
                 const nr = await requestUrl({ url: `${YAHOO_SEARCH}${encodeURIComponent(ticker)}&newsCount=4&quotesCount=0`, headers: { 'User-Agent': UA } });
-                news = (nr.json?.news ?? []).slice(0, 4).map((n: any) => ({ title: n.title, link: n.link, publisher: n.publisher }));
+                news = (nr.json?.news ?? []).slice(0, 4).map((n: YahooNewsItem) => ({ title: n.title ?? '', link: n.link ?? '', publisher: n.publisher ?? '' }));
             } catch { /* bonus feature */ }
         }
         return {
@@ -233,8 +244,9 @@ async function fetchAll(items: WatchItem[], range: SparkRange, pro: boolean): Pr
     return map;
 }
 
-function sparklineSVG(closes: number[], positive: boolean, W = 64, H = 26): string {
-    if (closes.length < 2) return '';
+function appendSparklineSVG(container: HTMLElement, closes: number[], positive: boolean, W = 64, H = 26) {
+    if (closes.length < 2) return;
+    const svgNS = 'http://www.w3.org/2000/svg';
     const P = 2;
     const min = Math.min(...closes), max = Math.max(...closes), range = max - min || 1;
     const pts = closes.map((c, i) => {
@@ -243,7 +255,16 @@ function sparklineSVG(closes: number[], positive: boolean, W = 64, H = 26): stri
         return `${x.toFixed(1)},${y.toFixed(1)}`;
     });
     const col = positive ? 'var(--color-green, #30d158)' : 'var(--color-red, #ff453a)';
-    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"><polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', String(W)); svg.setAttribute('height', String(H));
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    const polyline = document.createElementNS(svgNS, 'polyline');
+    polyline.setAttribute('points', pts.join(' '));
+    polyline.setAttribute('fill', 'none'); polyline.setAttribute('stroke', col);
+    polyline.setAttribute('stroke-width', '1.8');
+    polyline.setAttribute('stroke-linejoin', 'round'); polyline.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(polyline);
+    container.appendChild(svg);
 }
 
 function buildInteractiveChart(container: HTMLElement, closes: number[], timestamps: number[], positive: boolean, currency: string) {
@@ -271,51 +292,58 @@ function buildInteractiveChart(container: HTMLElement, closes: number[], timesta
         { frac: 0.5, val: (min + max) / 2 },
         { frac: 0,   val: min },
     ];
-    const gridLines = yLevels.map(({ frac, val }) => {
+
+    const wrap = container.createDiv({ cls: 'st-ichart-wrap' });
+    const svgNS = 'http://www.w3.org/2000/svg';
+
+    const mkSvgEl = (tag: string, attrs: Record<string, string>) => {
+        const el = document.createElementNS(svgNS, tag);
+        for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+        return el;
+    };
+
+    const svg = mkSvgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', class: 'st-ichart-svg' });
+
+    for (const { frac, val } of yLevels) {
         const y = (PT + chartH - frac * chartH).toFixed(1);
         const lbl = val >= 10000
             ? symFn + (val / 1000).toFixed(1) + 'k'
             : symFn + val.toFixed(val >= 100 ? 0 : 2);
-        return `<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--background-modifier-border)" stroke-width="0.5"/>
-                <text x="${(PL - 3).toFixed(1)}" y="${y}" dy="0.35em" text-anchor="end" fill="var(--text-faint)" font-size="8">${lbl}</text>`;
-    }).join('');
+        svg.appendChild(mkSvgEl('line', {
+            x1: String(PL), y1: y, x2: String(W - PR), y2: y,
+            stroke: 'var(--background-modifier-border)', 'stroke-width': '0.5',
+        }));
+        const yText = mkSvgEl('text', {
+            x: (PL - 3).toFixed(1), y, dy: '0.35em',
+            'text-anchor': 'end', fill: 'var(--text-faint)', 'font-size': '8',
+        });
+        yText.textContent = lbl;
+        svg.appendChild(yText);
+    }
 
-    // X-axis: ~4 time labels spread across the range
-    const xCount = 4;
-    const xLabels = Array.from({ length: xCount }, (_, i) => {
-        const idx = Math.round(i / (xCount - 1) * (closes.length - 1));
-        const x = toX(idx).toFixed(1);
-        const y = (H - 3).toFixed(1);
-        let lbl = '';
-        if (timestamps[idx]) {
-            const d = new Date(timestamps[idx] * 1000);
-            lbl = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-            // For longer ranges show date instead
-            if (timestamps[closes.length - 1] - timestamps[0] > 86400) {
-                lbl = d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
-            }
-        }
-        const anchor = i === 0 ? 'start' : i === xCount - 1 ? 'end' : 'middle';
-        return `<text x="${x}" y="${y}" text-anchor="${anchor}" fill="var(--text-faint)" font-size="8">${lbl}</text>`;
-    }).join('');
+    svg.appendChild(mkSvgEl('polygon', { points: areaPts, fill: col, opacity: '0.08' }));
+    svg.appendChild(mkSvgEl('polyline', {
+        points: pts, fill: 'none', stroke: col, 'stroke-width': '2',
+        'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+    }));
 
-    const wrap = container.createDiv({ cls: 'st-ichart-wrap' });
-    wrap.innerHTML = `
-<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;height:auto" xmlns="http://www.w3.org/2000/svg">
-  ${gridLines}
-  ${xLabels}
-  <polygon points="${areaPts}" fill="${col}" opacity="0.08"/>
-  <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-  <line class="st-ichart-vline" x1="0" y1="${PT}" x2="0" y2="${PT + chartH}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,2" opacity="0"/>
-  <circle class="st-ichart-dot" r="3.5" cx="0" cy="0" fill="${col}" stroke="var(--background-primary)" stroke-width="2" opacity="0"/>
-</svg>
-<div class="st-ichart-overlay" style="left:${PL}px;right:${PR}px;top:${PT}px;bottom:${PB}px;"></div>
-<div class="st-ichart-tip"></div>`;
+    const vline = mkSvgEl('line', {
+        class: 'st-ichart-vline',
+        x1: '0', y1: String(PT), x2: '0', y2: String(PT + chartH),
+        stroke: 'var(--text-faint)', 'stroke-width': '1', 'stroke-dasharray': '3,2', opacity: '0',
+    }) as SVGLineElement;
+    svg.appendChild(vline);
 
-    const vline   = wrap.querySelector('.st-ichart-vline')   as SVGLineElement;
-    const dot     = wrap.querySelector('.st-ichart-dot')     as SVGCircleElement;
-    const tip     = wrap.querySelector('.st-ichart-tip')     as HTMLDivElement;
-    const overlay = wrap.querySelector('.st-ichart-overlay') as HTMLDivElement;
+    const dot = mkSvgEl('circle', {
+        class: 'st-ichart-dot', r: '3.5', cx: '0', cy: '0',
+        fill: col, stroke: 'var(--background-primary)', 'stroke-width': '2', opacity: '0',
+    }) as SVGCircleElement;
+    svg.appendChild(dot);
+
+    wrap.appendChild(svg);
+
+    const overlay = wrap.createDiv({ cls: 'st-ichart-overlay' });
+    const tip     = wrap.createDiv({ cls: 'st-ichart-tip' });
 
     overlay.addEventListener('mousemove', (e: MouseEvent) => {
         const rect = overlay.getBoundingClientRect();
@@ -333,22 +361,20 @@ function buildInteractiveChart(container: HTMLElement, closes: number[], timesta
             label += '\u2002' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
         }
         tip.textContent = label;
-        tip.style.opacity = '1';
+        tip.setCssProps({ '--st-tip-opacity': '1' });
         // Position relative to wrap; offsetX is cursor position within the chart area + left padding
         const wrapRect = wrap.getBoundingClientRect();
         const cursorInWrap = e.clientX - wrapRect.left;
         if (cursorInWrap > wrapRect.width * 0.6) {
-            tip.style.left = 'auto';
-            tip.style.right = `${wrapRect.width - cursorInWrap + 8}px`;
+            tip.setCssProps({ '--st-tip-left': 'auto', '--st-tip-right': `${wrapRect.width - cursorInWrap + 8}px` });
         } else {
-            tip.style.left = `${cursorInWrap + 8}px`;
-            tip.style.right = 'auto';
+            tip.setCssProps({ '--st-tip-left': `${cursorInWrap + 8}px`, '--st-tip-right': 'auto' });
         }
     });
     overlay.addEventListener('mouseleave', () => {
         vline.setAttribute('opacity', '0');
         dot.setAttribute('opacity', '0');
-        tip.style.opacity = '0';
+        tip.setCssProps({ '--st-tip-opacity': '0' });
     });
 }
 
@@ -359,14 +385,14 @@ export default class ObsidiStocksPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
         this.registerView(VIEW_TYPE_STOCKS, leaf => new StocksView(leaf, this));
-        this.addRibbonIcon('trending-up', 'ObsidiStocks', () => this.activateView());
-        this.addCommand({ id: 'open-obsidistocks',     name: 'Open ObsidiStocks',                    callback: () => this.activateView()    });
-        this.addCommand({ id: 'insert-stocks-snapshot', name: 'Insert watchlist snapshot into note', callback: () => this.insertSnapshot() });
+        this.addRibbonIcon('trending-up', 'ObsidiStocks', () => { void this.activateView(); });
+        this.addCommand({ id: 'open-watchlist',     name: 'Open watchlist',                    callback: () => { void this.activateView(); }    });
+        this.addCommand({ id: 'insert-snapshot', name: 'Insert watchlist snapshot into note', callback: () => { void this.insertSnapshot(); } });
         this.addSettingTab(new StocksSettingTab(this.app, this));
-        this.activateView();
+        void this.activateView();
         this.scheduleRefresh();
         // silently re-verify on load (handles offline-at-install edge case)
-        this.revalidateLicence();
+        void this.revalidateLicence();
     }
 
     onunload() { if (this.timer !== null) window.clearInterval(this.timer); }
@@ -383,18 +409,18 @@ export default class ObsidiStocksPlugin extends Plugin {
     async activateView() {
         const { workspace } = this.app;
         const existing = workspace.getLeavesOfType(VIEW_TYPE_STOCKS);
-        if (existing.length > 0) { workspace.revealLeaf(existing[0]); return; }
+        if (existing.length > 0) { void workspace.revealLeaf(existing[0]); return; }
         const leaf = workspace.getRightLeaf(false);
-        if (leaf) { await leaf.setViewState({ type: VIEW_TYPE_STOCKS, active: true }); workspace.revealLeaf(leaf); }
+        if (leaf) { await leaf.setViewState({ type: VIEW_TYPE_STOCKS, active: true }); void workspace.revealLeaf(leaf); }
     }
 
     scheduleRefresh() {
         if (this.timer !== null) window.clearInterval(this.timer);
-        this.timer = window.setInterval(() => this.refreshViews(), Math.max(1, this.settings.refreshMins) * 60_000);
+        this.timer = window.setInterval(() => { void this.refreshViews(); }, Math.max(1, this.settings.refreshMins) * 60_000);
     }
 
     refreshViews() {
-        this.app.workspace.getLeavesOfType(VIEW_TYPE_STOCKS).forEach(l => (l.view as StocksView).refresh());
+        this.app.workspace.getLeavesOfType(VIEW_TYPE_STOCKS).forEach(l => { void (l.view as StocksView).refresh(); });
     }
 
     checkAlerts(item: WatchItem, q: Quote) {
@@ -409,7 +435,7 @@ export default class ObsidiStocksPlugin extends Plugin {
                     if (typeof Notification !== 'undefined' && Notification.permission === 'granted')
                         new Notification('ObsidiStocks', { body: `${name} is now ${dir} ${formatPrice(a.price, q.currency)}` });
                 } catch { /* ignore */ }
-                this.saveSettings();
+                void this.saveSettings();
             }
         }
     }
@@ -474,7 +500,7 @@ class StocksView extends ItemView {
             this.expandedSet.clear();
             this.expandedSet.add(ticker);
         }
-        this.render(false);
+        void this.render(false);
     }
 
     private async render(fetchPrices: boolean) {
@@ -507,26 +533,26 @@ class StocksView extends ItemView {
                     this.sortKey = sd.key;
                     this.sortDir = 'desc';
                 }
-                this.render(false);
+                void this.render(false);
             });
         }
         if (this.sortKey !== 'none') {
             const clr = acts.createEl('button', { cls: 'st-btn-icon st-sort-clear', text: '\u00d7', attr: { title: 'Clear sort' } });
-            clr.addEventListener('click', () => { this.sortKey = 'none'; this.render(false); });
+            clr.addEventListener('click', () => { this.sortKey = 'none'; void this.render(false); });
         }
         acts.createEl('span', { cls: 'st-actions-divider' });
         acts.createEl('button', { cls: 'st-btn-icon', text: '+', attr: { title: 'Add ticker' } })
-            .addEventListener('click', () => new AddTickerModal(this.app, this.plugin, () => this.refresh()).open());
+            .addEventListener('click', () => new AddTickerModal(this.app, this.plugin, () => { void this.refresh(); }).open());
         acts.createEl('button', { cls: 'st-btn-icon', text: '\u21bb', attr: { title: 'Refresh' } })
-            .addEventListener('click', () => this.refresh());
+            .addEventListener('click', () => { void this.refresh(); });
 
         const { watchlist } = this.plugin.settings;
 
         if (watchlist.length === 0) {
             const empty = containerEl.createDiv('st-empty');
             empty.createEl('p', { text: 'Watchlist is empty.' });
-            empty.createEl('button', { text: '+ Add a ticker', cls: 'st-add-first' })
-                 .addEventListener('click', () => new AddTickerModal(this.app, this.plugin, () => this.refresh()).open());
+            empty.createEl('button', { text: 'Add a ticker', cls: 'st-add-first' })
+                 .addEventListener('click', () => new AddTickerModal(this.app, this.plugin, () => { void this.refresh(); }).open());
             return;
         }
 
@@ -535,11 +561,13 @@ class StocksView extends ItemView {
             const pills = containerEl.createDiv('st-pills');
             for (const r of SPARK_RANGES) {
                 const pill = pills.createEl('button', { text: r.label, cls: `st-pill${this.sparkRange === r.value ? ' st-pill-active' : ''}` });
-                pill.addEventListener('click', async () => {
-                    this.sparkRange = r.value;
-                    this.plugin.settings.sparkRange = r.value;
-                    await this.plugin.saveSettings();
-                    await this.render(true);
+                pill.addEventListener('click', () => {
+                    void (async () => {
+                        this.sparkRange = r.value;
+                        this.plugin.settings.sparkRange = r.value;
+                        await this.plugin.saveSettings();
+                        await this.render(true);
+                    })();
                 });
             }
         }
@@ -586,11 +614,22 @@ class StocksView extends ItemView {
             wrap.dataset.ticker = item.ticker;
 
             const row = wrap.createDiv(`st-row${q ? (pos ? ' st-up' : ' st-down') : ''}`);
-            row.style.cursor = 'pointer';
+            row.addClass('st-row-clickable');
 
             // Drag handle
             const handle = row.createDiv('st-drag-handle');
-            handle.innerHTML = '<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="3" cy="3" r="1.3"/><circle cx="7" cy="3" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="7" cy="8" r="1.3"/><circle cx="3" cy="13" r="1.3"/><circle cx="7" cy="13" r="1.3"/></svg>';
+            (() => {
+                const svgNS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('width', '10'); svg.setAttribute('height', '16');
+                svg.setAttribute('viewBox', '0 0 10 16'); svg.setAttribute('fill', 'currentColor');
+                for (const [cx, cy] of [[3,3],[7,3],[3,8],[7,8],[3,13],[7,13]]) {
+                    const c = document.createElementNS(svgNS, 'circle');
+                    c.setAttribute('cx', String(cx)); c.setAttribute('cy', String(cy)); c.setAttribute('r', '1.3');
+                    svg.appendChild(c);
+                }
+                handle.appendChild(svg);
+            })();
 
             // Left
             const left    = row.createDiv('st-left');
@@ -602,31 +641,31 @@ class StocksView extends ItemView {
             if (q && q.dayHigh > 0 && q.dayLow > 0 && q.dayHigh !== q.dayLow) {
                 const rangePct = Math.max(0, Math.min(1, (q.price - q.dayLow) / (q.dayHigh - q.dayLow)));
                 const bar = left.createDiv('st-day-range-bar');
-                bar.createDiv('st-day-range-fill').style.width = `${(rangePct * 100).toFixed(1)}%`;
+                const fill = bar.createDiv('st-day-range-fill');
+                fill.setCssProps({ '--st-fill-width': `${(rangePct * 100).toFixed(1)}%` });
             }
 
             // Sparkline
             const spark = row.createDiv('st-spark');
-            if (q && q.closes.length >= 2) spark.innerHTML = sparklineSVG(q.closes, pos);
+            if (q && q.closes.length >= 2) appendSparklineSVG(spark, q.closes, pos);
 
             // Right
             const right = row.createDiv('st-right');
             if (q) {
                 right.createEl('span', { text: formatPrice(q.price, q.currency), cls: 'st-price' });
-                const mag      = changeMagnitude(Math.abs(q.changePct));
-                const chEl     = right.createEl('span', { text: formatChange(q.change, q.changePct, q.currency), cls: `st-change ${pos ? 'st-change-up' : 'st-change-down'}` });
-                chEl.style.opacity = String(0.4 + mag * 0.6);
+                const mag          = changeMagnitude(Math.abs(q.changePct));
                 const baseAlpha    = pos ? `hsla(142,65%,50%,` : `hsla(0,85%,60%,`;
-                chEl.style.background = `${baseAlpha}${(mag * 0.22).toFixed(2)})`;
+                const chEl         = right.createEl('span', { text: formatChange(q.change, q.changePct, q.currency), cls: `st-change ${pos ? 'st-change-up' : 'st-change-down'}` });
+                chEl.setCssProps({ '--st-change-opacity': String(0.4 + mag * 0.6), '--st-change-bg': `${baseAlpha}${(mag * 0.22).toFixed(2)})` });
             } else {
                 right.createEl('span', { text: '\u2014',       cls: 'st-price st-na' });
-                right.createEl('span', { text: 'unavailable', cls: 'st-change st-na' });
+                right.createEl('span', { text: 'Unavailable', cls: 'st-change st-na' });
             }
 
             // Hover sparkline tooltip
             if (q && q.closes.length >= 2) {
                 const tip = row.createDiv('st-spark-tip');
-                tip.innerHTML = sparklineSVG(q.closes, pos, 200, 56);
+                appendSparklineSVG(tip, q.closes, pos, 200, 56);
                 tip.createEl('span', { text: `${item.label || q.name}  ${formatPrice(q.price, q.currency)}`, cls: 'st-spark-tip-label' });
             }
 
@@ -668,7 +707,13 @@ class StocksView extends ItemView {
                         const ta = nw.createEl('textarea', { cls: 'st-note-input' });
                         ta.value = item.note ?? '';
                         ta.focus();
-                        ta.addEventListener('blur', async () => { item.note = ta.value.trim(); await this.plugin.saveSettings(); this.refresh(); });
+                        ta.addEventListener('blur', () => {
+                            void (async () => {
+                                item.note = ta.value.trim();
+                                await this.plugin.saveSettings();
+                                void this.refresh();
+                            })();
+                        });
                     });
                 }
 
@@ -677,15 +722,21 @@ class StocksView extends ItemView {
                     const aw = detail.createDiv('st-alert-wrap');
                     const ah = aw.createDiv('st-alert-hdr');
                     ah.createEl('span', { text: 'Alerts', cls: 'st-section-label' });
-                    ah.createEl('button', { text: '+ Alert', cls: 'st-small-btn' })
-                      .addEventListener('click', () => new AlertModal(this.app, item, q, async () => { await this.plugin.saveSettings(); this.refresh(); }).open());
+                    ah.createEl('button', { text: 'Add alert', cls: 'st-small-btn' })
+                      .addEventListener('click', () => new AlertModal(this.app, item, q, async () => { await this.plugin.saveSettings(); void this.refresh(); }).open());
                     if (item.alerts?.length) {
                         for (let ai = 0; ai < item.alerts.length; ai++) {
                             const a  = item.alerts[ai];
                             const ar = aw.createDiv('st-alert-row');
                             ar.createEl('span', { text: `${a.above ? '\u25b2 Above' : '\u25bc Below'} ${formatPrice(a.price, q.currency)}${a.triggered ? ' \u2713' : ''}`, cls: `st-alert-text${a.triggered ? ' st-alert-done' : ''}` });
                             ar.createEl('button', { text: '\u00d7', cls: 'st-small-btn st-del-btn' })
-                              .addEventListener('click', async () => { item.alerts.splice(ai, 1); await this.plugin.saveSettings(); this.refresh(); });
+                              .addEventListener('click', () => {
+                                  void (async () => {
+                                      item.alerts.splice(ai, 1);
+                                      await this.plugin.saveSettings();
+                                      void this.refresh();
+                                  })();
+                              });
                         }
                     }
                 }
@@ -705,12 +756,18 @@ class StocksView extends ItemView {
             // Context menu
             row.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                const menu = new (this.app as any).Menu();
-                menu.addItem((mi: any) => { mi.setTitle('Insert snapshot into note'); mi.setIcon('file-text'); mi.onClick(() => this.plugin.insertSnapshot()); });
+                const menu = new Menu();
+                menu.addItem((mi: MenuItem) => { mi.setTitle('Insert snapshot into note'); mi.setIcon('file-text'); mi.onClick(() => { void this.plugin.insertSnapshot(); }); });
                 menu.addSeparator();
-                menu.addItem((mi: any) => {
+                menu.addItem((mi: MenuItem) => {
                     mi.setTitle(`Remove ${item.label || item.ticker}`); mi.setIcon('trash');
-                    mi.onClick(async () => { this.plugin.settings.watchlist = this.plugin.settings.watchlist.filter(w => w.ticker !== item.ticker); await this.plugin.saveSettings(); this.refresh(); });
+                    mi.onClick(() => {
+                        void (async () => {
+                            this.plugin.settings.watchlist = this.plugin.settings.watchlist.filter(w => w.ticker !== item.ticker);
+                            await this.plugin.saveSettings();
+                            void this.refresh();
+                        })();
+                    });
                 });
                 menu.showAtMouseEvent(e);
             });
@@ -724,7 +781,8 @@ class StocksView extends ItemView {
             wrap.addEventListener('dragend', () => wrap.removeClass('st-dragging'));
             wrap.addEventListener('dragover', (e) => { e.preventDefault(); wrap.addClass('st-drag-over'); });
             wrap.addEventListener('dragleave', () => wrap.removeClass('st-drag-over'));
-            wrap.addEventListener('drop', async (e) => {
+            wrap.addEventListener('drop', (e) => {
+                void (async () => {
                 e.preventDefault();
                 wrap.removeClass('st-drag-over');
                 const fromTicker = e.dataTransfer!.getData('text/plain');
@@ -735,7 +793,8 @@ class StocksView extends ItemView {
                 const [moved] = wl.splice(fromIdx, 1);
                 wl.splice(toIdx, 0, moved);
                 await this.plugin.saveSettings();
-                this.render(false);
+                void this.render(false);
+                })();
             });
         }
 
@@ -746,7 +805,7 @@ class StocksView extends ItemView {
                 ? `Showing ${FREE_LIMIT} of ${watchlist.length} tickers. `
                 : 'Free plan. ';
             u.createEl('span', { text: txt });
-            const a = u.createEl('a', { text: 'Get ObsidiStocks Pro \u2192', cls: 'st-pro-link' });
+            const a = u.createEl('a', { text: 'Get pro \u2192', cls: 'st-pro-link' });
             a.href = 'https://gumroad.com/l/obsidistocks-pro';
         }
 
@@ -764,22 +823,23 @@ class AddTickerModal extends Modal {
     constructor(app: App, plugin: ObsidiStocksPlugin, onDone: () => void) { super(app); this.plugin = plugin; this.onDone = onDone; }
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h3', { text: 'Add to watchlist' });
+        new Setting(contentEl).setName('Add to watchlist').setHeading();
         let ticker = '', label = '';
         new Setting(contentEl).setName('Ticker symbol')
-            .setDesc('Yahoo Finance \u2014 e.g. AAPL \u00b7 BARC.L \u00b7 GC=F \u00b7 BTC-USD \u00b7 ^FTSE \u00b7 ETH-USD')
             .addText(t => t.setPlaceholder('AAPL').onChange(v => { ticker = v.toUpperCase().trim(); }));
         new Setting(contentEl).setName('Label (optional)').setDesc('Friendly name shown in the list')
             .addText(t => t.setPlaceholder('Apple').onChange(v => { label = v.trim(); }));
         new Setting(contentEl)
-            .addButton(btn => btn.setButtonText('Add').setCta().onClick(async () => {
-                if (!ticker) { new Notice('Enter a ticker symbol'); return; }
-                if (this.plugin.settings.watchlist.find(w => w.ticker === ticker)) { new Notice(`${ticker} already in watchlist`); return; }
-                if (!this.plugin.isProEnabled() && this.plugin.settings.watchlist.length >= FREE_LIMIT) {
-                    new Notice(`Free plan: max ${FREE_LIMIT} tickers. Upgrade to Pro for unlimited.`); return;
-                }
-                this.plugin.settings.watchlist.push({ ticker, label, note: '', alerts: [] });
-                await this.plugin.saveSettings(); this.close(); this.onDone();
+            .addButton(btn => btn.setButtonText('Add').setCta().onClick(() => {
+                void (async () => {
+                    if (!ticker) { new Notice('Enter a ticker symbol'); return; }
+                    if (this.plugin.settings.watchlist.find(w => w.ticker === ticker)) { new Notice(`${ticker} already in watchlist`); return; }
+                    if (!this.plugin.isProEnabled() && this.plugin.settings.watchlist.length >= FREE_LIMIT) {
+                        new Notice(`Free plan: max ${FREE_LIMIT} tickers. Upgrade to pro for unlimited.`); return;
+                    }
+                    this.plugin.settings.watchlist.push({ ticker, label, note: '', alerts: [] });
+                    await this.plugin.saveSettings(); this.close(); this.onDone();
+                })();
             }))
             .addButton(btn => btn.setButtonText('Cancel').onClick(() => this.close()));
     }
@@ -787,11 +847,11 @@ class AddTickerModal extends Modal {
 }
 
 class AlertModal extends Modal {
-    private item: WatchItem; private quote: Quote; private onSave: () => void;
-    constructor(app: App, item: WatchItem, quote: Quote, onSave: () => void) { super(app); this.item = item; this.quote = quote; this.onSave = onSave; }
+    private item: WatchItem; private quote: Quote; private onSave: () => Promise<void>;
+    constructor(app: App, item: WatchItem, quote: Quote, onSave: () => Promise<void>) { super(app); this.item = item; this.quote = quote; this.onSave = onSave; }
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h3', { text: `Alert \u2014 ${this.item.label || this.item.ticker}` });
+        new Setting(contentEl).setName(`Alert \u2014 ${this.item.label || this.item.ticker}`).setHeading();
         contentEl.createEl('p', { text: `Current: ${formatPrice(this.quote.price, this.quote.currency)}`, cls: 'st-modal-price' });
         let above = true, alertPrice = this.quote.price;
         new Setting(contentEl).setName('Direction')
@@ -799,10 +859,12 @@ class AlertModal extends Modal {
         new Setting(contentEl).setName('Price')
             .addText(t => t.setPlaceholder(this.quote.price.toFixed(2)).setValue(this.quote.price.toFixed(2)).onChange(v => { alertPrice = parseFloat(v) || this.quote.price; }));
         new Setting(contentEl)
-            .addButton(btn => btn.setButtonText('Set alert').setCta().onClick(async () => {
-                if (!this.item.alerts) this.item.alerts = [];
-                this.item.alerts.push({ above, price: alertPrice, triggered: false });
-                await this.onSave(); this.close();
+            .addButton(btn => btn.setButtonText('Set alert').setCta().onClick(() => {
+                void (async () => {
+                    if (!this.item.alerts) this.item.alerts = [];
+                    this.item.alerts.push({ above, price: alertPrice, triggered: false });
+                    await this.onSave(); this.close();
+                })();
             }))
             .addButton(btn => btn.setButtonText('Cancel').onClick(() => this.close()));
     }
@@ -815,13 +877,13 @@ class StocksSettingTab extends PluginSettingTab {
     display() {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl('h2', { text: 'ObsidiStocks' });
+        new Setting(containerEl).setName('ObsidiStocks').setHeading();
         new Setting(containerEl).setName('Auto-refresh (minutes)')
             .addSlider(s => s.setLimits(1, 60, 1).setValue(this.plugin.settings.refreshMins).setDynamicTooltip()
                 .onChange(async v => { this.plugin.settings.refreshMins = v; await this.plugin.saveSettings(); this.plugin.scheduleRefresh(); }));
-        containerEl.createEl('h3', { text: 'Watchlist' });
+        new Setting(containerEl).setName('Watchlist').setHeading();
         new Setting(containerEl).setName('Add ticker')
-            .addButton(btn => btn.setButtonText('+ Add').setCta().onClick(() => {
+            .addButton(btn => btn.setButtonText('Add').setCta().onClick(() => {
                 new AddTickerModal(this.app, this.plugin, () => { this.display(); this.plugin.refreshViews(); }).open();
             }));
         const { watchlist } = this.plugin.settings;
@@ -831,28 +893,29 @@ class StocksSettingTab extends PluginSettingTab {
                 const item = watchlist[i];
                 new Setting(containerEl).setName(item.label || item.ticker).setDesc(item.label ? item.ticker : '')
                     .addButton(btn => btn.setIcon('arrow-up').setTooltip('Move up').setDisabled(i === 0)
-                        .onClick(async () => { [watchlist[i-1], watchlist[i]] = [watchlist[i], watchlist[i-1]]; await this.plugin.saveSettings(); this.display(); this.plugin.refreshViews(); }))
+                        .onClick(() => { void (async () => { [watchlist[i-1], watchlist[i]] = [watchlist[i], watchlist[i-1]]; await this.plugin.saveSettings(); this.display(); this.plugin.refreshViews(); })(); }))
                     .addButton(btn => btn.setIcon('arrow-down').setTooltip('Move down').setDisabled(i === watchlist.length - 1)
-                        .onClick(async () => { [watchlist[i+1], watchlist[i]] = [watchlist[i], watchlist[i+1]]; await this.plugin.saveSettings(); this.display(); this.plugin.refreshViews(); }))
+                        .onClick(() => { void (async () => { [watchlist[i+1], watchlist[i]] = [watchlist[i], watchlist[i+1]]; await this.plugin.saveSettings(); this.display(); this.plugin.refreshViews(); })(); }))
                     .addButton(btn => btn.setIcon('trash').setTooltip('Remove')
-                        .onClick(async () => { watchlist.splice(i, 1); await this.plugin.saveSettings(); this.display(); this.plugin.refreshViews(); }));
+                        .onClick(() => { void (async () => { watchlist.splice(i, 1); await this.plugin.saveSettings(); this.display(); this.plugin.refreshViews(); })(); }));
             }
         }
-        containerEl.createEl('h3', { text: 'Pro Licence' });
+        new Setting(containerEl).setName('Pro licence').setHeading();
         const pro = this.plugin.isProEnabled();
         let keyInput = '';
-        const licSetting = new Setting(containerEl)
+        new Setting(containerEl)
             .setName('Licence key')
-            .setDesc(pro ? '\u2705 Pro active \u2014 thank you!' : 'Paste your Gumroad licence key and click Verify')
+            .setDesc(pro ? 'Pro licence active \u2014 thank you!' : 'Paste your licence key and click verify')
             .addText(t => {
-                t.setPlaceholder('XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX')
+                t.setPlaceholder('Paste licence key here')
                  .setValue(this.plugin.settings.licenceKey)
                  .onChange(v => { keyInput = v.trim(); });
                 keyInput = this.plugin.settings.licenceKey;
             })
             .addButton(btn => {
                 btn.setButtonText(pro ? 'Re-verify' : 'Verify').setCta();
-                btn.onClick(async () => {
+                btn.onClick(() => {
+                    void (async () => {
                     const key = keyInput || this.plugin.settings.licenceKey;
                     if (!key) { new Notice('Paste your licence key first'); return; }
                     btn.setButtonText('Checking\u2026').setDisabled(true);
@@ -862,22 +925,25 @@ class StocksSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                     this.plugin.refreshViews();
                     if (valid) {
-                        new Notice('\u2705 Pro unlocked! Thank you.');
+                        new Notice('Pro licence activated \u2014 thank you!');
                     } else {
-                        new Notice('\u274c Key not recognised. Check it on your Gumroad receipt.');
+                        new Notice('Key not recognised \u2014 check your purchase receipt.');
                     }
                     this.display();
+                    })();
                 });
             });
         if (pro) {
             const deact = containerEl.createDiv('st-licence-deact');
             deact.createEl('a', { text: 'Remove licence key', cls: 'st-deact-link' })
-                 .addEventListener('click', async () => {
-                     this.plugin.settings.licenceKey   = '';
-                     this.plugin.settings.licenceValid = false;
-                     await this.plugin.saveSettings();
-                     this.plugin.refreshViews();
-                     this.display();
+                 .addEventListener('click', () => {
+                     void (async () => {
+                         this.plugin.settings.licenceKey   = '';
+                         this.plugin.settings.licenceValid = false;
+                         await this.plugin.saveSettings();
+                         this.plugin.refreshViews();
+                         this.display();
+                     })();
                  });
         }
         if (!pro) {
@@ -885,7 +951,7 @@ class StocksSettingTab extends PluginSettingTab {
             cta.createEl('p', { text: 'Pro includes:', cls: 'st-pro-title' });
             const ul = cta.createEl('ul');
             ['Unlimited tickers', 'Price alerts with OS notifications', 'Sparkline range \u2014 1W / 1M / 3M / 1Y', 'Latest news per ticker', 'Notes per ticker, stored in your vault', 'Pre & post-market prices'].forEach(f => ul.createEl('li', { text: f }));
-            const a = cta.createEl('a', { text: 'Get Pro \u2192', cls: 'st-pro-link' });
+            const a = cta.createEl('a', { text: 'Get pro \u2192', cls: 'st-pro-link' });
             a.href = 'https://gumroad.com/l/obsidistocks-pro';
         }
     }
