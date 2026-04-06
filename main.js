@@ -570,7 +570,7 @@ var StocksView = class extends import_obsidian.ItemView {
     containerEl.addClass("st-view");
     const pro = this.plugin.isProEnabled();
     const hdr = containerEl.createDiv("st-header");
-    hdr.createEl("span", { text: pro ? "ObsidiStocks Pro" : "ObsidiStocks", cls: pro ? "st-title st-title-pro" : "st-title" });
+    hdr.createEl("span", { text: pro ? "ObsidiStocks pro" : "ObsidiStocks", cls: pro ? "st-title st-title-pro" : "st-title" });
     const acts = hdr.createDiv("st-actions");
     const sortDefs = [
       { key: "price", label: "$" },
@@ -946,7 +946,6 @@ var StocksSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("ObsidiStocks").setHeading();
     new import_obsidian.Setting(containerEl).setName("Auto-refresh (minutes)").addSlider((s) => s.setLimits(1, 60, 1).setValue(this.plugin.settings.refreshMins).setDynamicTooltip().onChange(async (v) => {
       this.plugin.settings.refreshMins = v;
       await this.plugin.saveSettings();

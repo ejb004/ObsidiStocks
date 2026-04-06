@@ -511,7 +511,7 @@ class StocksView extends ItemView {
 
         // Header
         const hdr = containerEl.createDiv('st-header');
-        hdr.createEl('span', { text: pro ? 'ObsidiStocks Pro' : 'ObsidiStocks', cls: pro ? 'st-title st-title-pro' : 'st-title' });
+        hdr.createEl('span', { text: pro ? 'ObsidiStocks pro' : 'ObsidiStocks', cls: pro ? 'st-title st-title-pro' : 'st-title' });
         const acts = hdr.createDiv('st-actions');
         // Sort controls
         const sortDefs: { key: typeof this.sortKey; label: string }[] = [
@@ -877,7 +877,6 @@ class StocksSettingTab extends PluginSettingTab {
     display() {
         const { containerEl } = this;
         containerEl.empty();
-        new Setting(containerEl).setName('ObsidiStocks').setHeading();
         new Setting(containerEl).setName('Auto-refresh (minutes)')
             .addSlider(s => s.setLimits(1, 60, 1).setValue(this.plugin.settings.refreshMins).setDynamicTooltip()
                 .onChange(async v => { this.plugin.settings.refreshMins = v; await this.plugin.saveSettings(); this.plugin.scheduleRefresh(); }));
