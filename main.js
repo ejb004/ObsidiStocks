@@ -411,7 +411,7 @@ var ObsidiStocksPlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
     this.registerView(VIEW_TYPE_STOCKS, (leaf) => new StocksView(leaf, this));
-    this.addRibbonIcon("trending-up", "ObsidiStocks", () => {
+    this.addRibbonIcon("trending-up", "Obsidistocks", () => {
       void this.activateView();
     });
     this.addCommand({ id: "open-watchlist", name: "Open watchlist", callback: () => {
@@ -533,9 +533,8 @@ var StocksView = class extends import_obsidian.ItemView {
   getViewType() {
     return VIEW_TYPE_STOCKS;
   }
-  // eslint-disable-next-line obsidianmd/ui/sentence-case
   getDisplayText() {
-    return "ObsidiStocks";
+    return "Obsidistocks";
   }
   getIcon() {
     return "trending-up";
