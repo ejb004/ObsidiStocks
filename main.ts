@@ -385,6 +385,7 @@ export default class ObsidiStocksPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
         this.registerView(VIEW_TYPE_STOCKS, leaf => new StocksView(leaf, this));
+        // eslint-disable-next-line obsidianmd/ui/sentence-case
         this.addRibbonIcon('trending-up', 'ObsidiStocks', () => { void this.activateView(); });
         this.addCommand({ id: 'open-watchlist',     name: 'Open watchlist',                    callback: () => { void this.activateView(); }    });
         this.addCommand({ id: 'insert-snapshot', name: 'Insert watchlist snapshot into note', callback: () => { void this.insertSnapshot(); } });
@@ -481,6 +482,7 @@ class StocksView extends ItemView {
     }
 
     getViewType()    { return VIEW_TYPE_STOCKS; }
+    // eslint-disable-next-line obsidianmd/ui/sentence-case
     getDisplayText() { return 'ObsidiStocks'; }
     getIcon()        { return 'trending-up'; }
 

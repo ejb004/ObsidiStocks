@@ -533,6 +533,7 @@ var StocksView = class extends import_obsidian.ItemView {
   getViewType() {
     return VIEW_TYPE_STOCKS;
   }
+  // eslint-disable-next-line obsidianmd/ui/sentence-case
   getDisplayText() {
     return "ObsidiStocks";
   }
